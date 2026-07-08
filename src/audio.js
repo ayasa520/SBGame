@@ -46,7 +46,7 @@ export class SFX {
   async _loadSamples() {
     this.samples = {};
     try {
-      const res = await fetch('/sfx/juice-splash.wav');
+      const res = await fetch(import.meta.env.BASE_URL + 'sfx/juice-splash.wav');
       const raw = await res.arrayBuffer();
       this.samples.splash = await this.ctx.decodeAudioData(raw);
     } catch {
