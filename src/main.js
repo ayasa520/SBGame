@@ -1,51 +1,14 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { SFX } from './audio.js';
-import { CrowdRenderer, soldierParts, zombieParts, infectedSoldierParts } from './crowd.js';
-
-// ============================================================ 常量
-const ROAD_W = 11;
-const SQUAD_X_LIMIT = 3.4;
-const MAX_SOLDIER_RENDER = 140;
-const MAX_ZOMBIE_RENDER = 500;      // 允许僵尸铺满整个屏幕
-const MAX_BULLETS = 700;
-const MAX_SQUAD_RADIUS = 2.3;
-const BASE_SPACING = 0.62;
-const MAX_SHOOTERS = 50;
-const GATE_W = 4.6;
-const GATE_H = 3.4;
-const CHUNK_LEN = 120;              // 环境按块无限生成
-
-// 无尽模式节奏（单位：世界距离）
-const GATE_SPACING = 55;            // 门的间隔（比之前稀疏）
-const PICKUP_SPACING = 110;         // 道具箱平均间隔
-const WAVE_SPACING = 26;
-const FIRST_BOSS_AT = 320;
-const BOSS_INTERVAL = 420;
-
-// 难度系数：随跑过的距离无限增长
-const diffAt = (dist) => 1 + dist / 140;
-
-// ============================================================ 武器表
-const WEAPONS = {
-  rifle:   { name: '🔫 步枪',   kind: 'tracer', rate: 2.6,  dmg: 1,   speed: 44, color: 0xffe27a, pellets: 1, spread: 0,    aoe: 0,   size: 1 },
-  shotgun: { name: '💥 霰弹枪', kind: 'tracer', rate: 1.6,  dmg: 1,   speed: 40, color: 0xffa94a, pellets: 3, spread: 0.42, aoe: 0,   size: 1.25 },
-  minigun: { name: '🌀 加特林', kind: 'tracer', rate: 5.2,  dmg: 0.6, speed: 52, color: 0x9fffd0, pellets: 1, spread: 0.12, aoe: 0,   size: 0.75 },
-  rocket:  { name: '🚀 火箭筒', kind: 'rocket', rate: 0.8,  dmg: 5,   speed: 28, color: 0xff6a3a, pellets: 1, spread: 0,    aoe: 2.2, size: 1 },
-  tesla:   { name: '⚡ 电击器', kind: 'zap',    rate: 0.75, dmg: 3.2, speed: 0,  color: 0x7ae4ff, pellets: 1, spread: 0,    aoe: 0,   size: 1 },
-  flamer:  { name: '🔥 喷火器', kind: 'flame',  rate: 5.5,  dmg: 0.4, speed: 21, color: 0xff9a3a, pellets: 2, spread: 0.4, aoe: 0.8, size: 1, range: 22 },
-};
-const WEAPON_KEYS = Object.keys(WEAPONS);
-
-// ============================================================ 道具表
-const ITEMS = {
-  medkit: { icon: '➕', name: '增援',  color: 0x3ddc84 },
-  rage:   { icon: '🔥', name: '狂暴',  color: 0xff7a3a },
-  shield: { icon: '🛡️', name: '护盾', color: 0x58baff },
-  laser:  { icon: '🔆', name: '全屏激光', color: 0xff4a6a },
-  freeze: { icon: '❄️', name: '冰冻', color: 0x9adfff },
-  nuke:   { icon: '☢️', name: '核弹', color: 0xffd24a },
-};
+import { CrowdRenderer, soldierParts, zombieParts } from './crowd.js';
+import {
+  ROAD_W, SQUAD_X_LIMIT, MAX_SOLDIER_RENDER, MAX_ZOMBIE_RENDER, MAX_BULLETS,
+  MAX_SQUAD_RADIUS, BASE_SPACING, MAX_SHOOTERS, GATE_W, GATE_H, CHUNK_LEN,
+  GATE_SPACING, PICKUP_SPACING, WAVE_SPACING, FIRST_BOSS_AT, BOSS_INTERVAL,
+  diffAt, WEAPONS, WEAPON_KEYS, ITEMS,
+} from './config.js';
+import { ZOMBIE_TYPES, ZOMBIE_TYPE_KEYS } from './types.js';
 
 // ============================================================ 基础三件套
 const app = document.getElementById('app');
@@ -969,67 +932,6 @@ function gore(x, z) {
   spawnBurst(x, 0.6, z, 0x7a0a12, 8, 3.5, 0.65);
   spawnBloodPool(x, z);
 }
-
-// ============================================================ 僵尸类型（致敬 CSOL 生化模式）
-const ZOMBIE_TYPES = {
-  // 普通僵尸：均衡，技能"暴走"——靠近时短暂提速
-  normal: {
-    label: '普通僵尸',
-    palette: { legs: 0x3d4a2c, torso: 0x5c8a3c, head: 0x8fc46a, arms: 0x74a84e },
-    hp: (d) => 1 + Math.floor(d * 1.3),
-    speedMul: 1, scaleBase: 0.9, contactLoss: 1, maxRender: MAX_ZOMBIE_RENDER,
-    unlockAt: 0,
-  },
-  // 恶魔猎手：技能"突进"——周期性猛冲
-  hunter: {
-    label: '恶魔猎手',
-    palette: { legs: 0x5a1e1e, torso: 0x8a2a22, head: 0xc4553c, arms: 0xa03828 },
-    hp: (d) => 2 + Math.floor(d * 1.1),
-    speedMul: 1.15, scaleBase: 0.95, contactLoss: 1, maxRender: 150,
-    unlockAt: 150,
-  },
-  // 憎恶屠夫：血牛肉盾，撞上一次啃掉 3 人
-  butcher: {
-    label: '憎恶屠夫',
-    palette: { legs: 0x2c3038, torso: 0x4a525e, head: 0x9aa4b0, arms: 0x6a7480 },
-    hp: (d) => 8 + Math.floor(d * 4.5),
-    speedMul: 0.62, scaleBase: 1.5, contactLoss: 3, maxRender: 80,
-    unlockAt: 250,
-  },
-  // 暗影芭比：技能"潜行"——周期性相位隐身，隐身时子弹穿过打不中
-  shadow: {
-    label: '暗影芭比',
-    palette: { legs: 0x2a2438, torso: 0x453a5e, head: 0x8a7ab8, arms: 0x5e5080 },
-    hp: (d) => 1 + Math.floor(d * 0.9),
-    speedMul: 1.3, scaleBase: 0.85, contactLoss: 1, maxRender: 120,
-    unlockAt: 350,
-  },
-  // 巫蛊术尸：技能"咒疗"——周期性治疗周围僵尸
-  witch: {
-    label: '巫蛊术尸',
-    palette: { legs: 0x1e4038, torso: 0x2a6a58, head: 0x58c4a8, arms: 0x3a8a70 },
-    hp: (d) => 2 + Math.floor(d * 1.2),
-    speedMul: 0.85, scaleBase: 0.95, contactLoss: 1, maxRender: 60,
-    unlockAt: 500,
-  },
-  // 嗜血女妖：技能"诱捕"——放出蝙蝠把小队拽向自己
-  banshee: {
-    label: '嗜血女妖',
-    palette: { legs: 0x3a1a30, torso: 0x6a2a58, head: 0xc46aa8, arms: 0x8a3a70 },
-    hp: (d) => 3 + Math.floor(d * 1.4),
-    speedMul: 0.95, scaleBase: 1.0, contactLoss: 1, maxRender: 60,
-    unlockAt: 650,
-  },
-  // 被感染的士兵：保持距离用步枪射击人类，射速低
-  infected: {
-    label: '被感染的士兵',
-    parts: infectedSoldierParts,
-    hp: (d) => 2 + Math.floor(d * 1.0),
-    speedMul: 0.9, scaleBase: 0.95, contactLoss: 1, maxRender: 80,
-    unlockAt: 450,
-  },
-};
-const ZOMBIE_TYPE_KEYS = Object.keys(ZOMBIE_TYPES);
 
 // ============================================================ 士兵 & 僵尸群渲染（每种僵尸一个实例化渲染器）
 const soldierCrowd = new CrowdRenderer(scene, soldierParts(), MAX_SOLDIER_RENDER);
